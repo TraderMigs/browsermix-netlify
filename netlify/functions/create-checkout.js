@@ -1,3 +1,5 @@
+const { preflight, corsHeaders } = require('./util');
+
 // Your live price id (from you)
 const PRICE_ID = 'price_1RsjJZRrIlnVe6VQwjaCfrXo';
 
@@ -6,7 +8,13 @@ const PRICE_ID = 'price_1RsjJZRrIlnVe6VQwjaCfrXo';
 const NETLIFY_BASE = 'https://browsermix.netlify.app';
 
 exports.handler = async (event) => {
-  const pf = preflight(event); if (pf) return pf;
+  // Handle CORS preflight *before* loading heavy deps
+  const pf = preflight(event); 
+  if (pf) return pf;
+
+  // Load Stripe only for real requests (avoids preflight failures)
+  const Stripe = require('stripe');
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
 
   try {
     const body = event.body ? JSON.parse(event.body) : {};
