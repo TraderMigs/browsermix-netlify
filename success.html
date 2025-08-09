@@ -1,10 +1,37 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
 <head>
-  <title>Success</title>
+  <meta charset="utf-8">
+  <title>BrowserMix — Redirecting…</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: Arial, sans-serif; padding: 24px; }
+    .mono { font-family: monospace; word-break: break-all; }
+  </style>
 </head>
 <body>
-  <h1>Payment Successful ✅</h1>
-  <p>Your payment has been processed successfully. You may now close this tab.</p>
+  <h2>Payment successful</h2>
+  <p>Redirecting to activate your extension…</p>
+  <p class="mono" id="dbg"></p>
+  <script>
+    (function () {
+      const p = new URLSearchParams(location.search);
+      const ext = p.get('ext');
+      const sid = p.get('session_id');
+      const dbg = document.getElementById('dbg');
+
+      if (!ext || !sid) {
+        dbg.textContent = 'Missing ext or session_id in URL. Please contact support.';
+        return;
+      }
+
+      // Bounce directly into the extension's thankyou page with session_id
+      const target = `chrome-extension://${ext}/thankyou.html?session_id=${encodeURIComponent(sid)}`;
+      dbg.textContent = target;
+
+      // Give the text a moment to render (helps debugging), then redirect.
+      setTimeout(() => { location.href = target; }, 400);
+    })();
+  </script>
 </body>
 </html>
