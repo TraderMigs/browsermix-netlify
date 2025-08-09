@@ -1,8 +1,5 @@
-[build]
-  functions = "functions"
-  command = ""
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
 
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
+# (no other config needed)
