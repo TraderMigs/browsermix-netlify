@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "dependencies": {
+    "@netlify/blobs": "^6.0.0",
     "jsonwebtoken": "^9.0.2",
     "stripe": "^16.6.0"
   }
