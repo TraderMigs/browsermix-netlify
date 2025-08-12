@@ -1,14 +1,13 @@
-/* ===== CORS + Blobs utils (Netlify Functions, Node 18) ===== */
-const { getStore } = require("@netlify/blobs");
+// netlify/functions/util.js
+const { getStore } = require('@netlify/blobs');
 
-/* CORS (shared by all endpoints) */
+// CORS helpers (unchanged)
 const cors = {
   headers: {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers":
-      "authorization, x-client-info, apikey, content-type",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-  },
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS"
+  }
 };
 exports.preflight = (event) => {
   if (event.httpMethod === "OPTIONS") {
@@ -18,36 +17,24 @@ exports.preflight = (event) => {
 };
 exports.corsHeaders = cors.headers;
 
-/* ----- Blobs: simple key/value store for licenses ----- */
-/* One store named "licenses". Netlify auto-wires credentials in prod. */
-const store = getStore({ name: "licenses" });
+// --- Blobs helpers (lazy store creation) ---
+async function getLicensesStore() {
+  // Pass siteId/token so it works in all environments
+  return getStore('licenses', {
+    siteId: process.env.NETLIFY_SITE_ID,
+    token: process.env.NETLIFY_BLOBS_TOKEN
+  });
+}
 
-/** Read license record by key (string). Returns object or null. */
+exports.upsertLicense = async (key, value) => {
+  const store = await getLicensesStore();
+  await store.set(key, JSON.stringify(value), {
+    metadata: { contentType: 'application/json' }
+  });
+};
+
 exports.getLicense = async (key) => {
-  if (!key) return null;
-  return await store.get(key, { type: "json" }); // null if missing
-};
-
-/** Write/replace license record at key (string). */
-exports.setLicense = async (key, data) => {
-  if (!key) throw new Error("Missing license key");
-  await store.set(key, JSON.stringify(data), {
-    contentType: "application/json",
-  });
-  return true;
-};
-
-/** Merge+save: reads existing (if any), shallow-merges, writes back. */
-exports.upsertLicense = async (key, patch) => {
-  if (!key) throw new Error("Missing license key");
-  const existing = (await store.get(key, { type: "json" })) || {};
-  const merged = {
-    ...existing,
-    ...patch,
-    updated_at: new Date().toISOString(),
-  };
-  await store.set(key, JSON.stringify(merged), {
-    contentType: "application/json",
-  });
-  return merged;
+  const store = await getLicensesStore();
+  const val = await store.get(key, { type: 'json' });
+  return val || null;
 };
