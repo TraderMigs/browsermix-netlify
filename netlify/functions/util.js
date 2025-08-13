@@ -1,55 +1,47 @@
 // netlify/functions/util.js
-// Utility helpers: CORS + Blobs-backed license upsert.
-//
-// IMPORTANT for Netlify Blobs:
-// - Call getStore() *inside* a function that's invoked per request.
-// - Provide siteID + token when running in environments where they're not injected automatically.
-//
-// Docs: https://docs.netlify.com/storage/overview/#blob-store
-// JavaScript API (getStore options): https://docs.netlify.com/storage/overview/#blob-store
-// (siteID/token are set automatically in Functions, but can be supplied manually)
+// Small helpers shared by functions (CJS)
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST,OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type,Stripe-Signature",
+  "Access-Control-Allow-Methods": "POST,OPTIONS",
 };
 
 function preflight(event) {
   if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: corsHeaders };
+    return { statusCode: 200, headers: corsHeaders, body: "ok" };
   }
   return null;
 }
 
 /**
- * Upsert a license record in Netlify Blobs.
- * @param {string} idOrEmail - Stripe customer ID or e-mail
- * @param {object} patch - fields to upsert
+ * Upsert a "license" record in Netlify Blobs.
+ * IMPORTANT: create the Blobs store *inside* the function so the Netlify runtime
+ * is fully initialized, and provide manual credentials (siteID, token).
  */
 async function upsertLicense(idOrEmail, patch) {
-  // Import at call-time so we’re not initializing at module scope.
+  // ESM-only package: import dynamically from CJS
   const { getStore } = await import("@netlify/blobs");
 
   const store = getStore({
     name: "licenses",
-    // Supply these explicitly to avoid "environment not configured" errors.
+    // Manual mode so it works in Functions runtime
     siteID: process.env.NETLIFY_SITE_ID,
-    token: process.env.NETLIFY_BLOBS_TOKEN,
+    token: process.env.NETLIFY_BLOBS_TOKEN, // Personal Access Token / site-scoped token
   });
 
-  const key = `license:${String(idOrEmail || "").toLowerCase()}`;
+  const key = `license:${idOrEmail}`;
+  const existing = (await store.get(key, { type: "json" })) || {};
 
-  // Merge with any existing record
-  const existing = (await store.getJSON(key)) || {};
-  const merged = {
+  const next = {
+    id: idOrEmail || existing.id || null,
     ...existing,
     ...patch,
     updated_at: new Date().toISOString(),
   };
 
-  await store.setJSON(key, merged);
-  return merged;
+  await store.setJSON(key, next);
+  return next;
 }
 
 module.exports = { corsHeaders, preflight, upsertLicense };
