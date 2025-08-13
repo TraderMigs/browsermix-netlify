@@ -1,36 +1,37 @@
 // netlify/functions/stripe-webhook.js
-// ===== Stripe Webhook (Netlify Functions) =====
-// IMPORTANT: Do NOT parse event.body before verifying the signature.
-// Env needed: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, NETLIFY_SITE_ID, NETLIFY_BLOBS_TOKEN
+// Stripe webhook for Netlify Functions (CJS)
 
 const Stripe = require("stripe");
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2024-06-20",
-});
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const { upsertLicense, preflight, corsHeaders } = require("./util.js");
 
 exports.handler = async (event) => {
-  // Basic CORS preflight (Stripe won't use it, but keeps consistency)
+  // (A) CORS preflight (Stripe won’t hit this, but keeps things tidy in dev)
   const pf = preflight(event);
   if (pf) return pf;
 
+  // (B) Method guard
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, headers: corsHeaders, body: "Method Not Allowed" };
   }
 
-  // Stripe requires the raw request body for signature verification.
-  // Do NOT JSON.parse(event.body) before constructEvent.
-  // See: https://docs.stripe.com/webhooks#signatures
+  // (C) Verify Stripe signature against the *raw* body
   const sig = event.headers["stripe-signature"];
   if (!sig) {
     return { statusCode: 400, headers: corsHeaders, body: "Missing signature" };
   }
 
+  // Netlify can base64-encode the body. Hand Stripe the exact raw string.
+  const raw =
+    event.isBase64Encoded
+      ? Buffer.from(event.body, "base64").toString("utf8")
+      : event.body;
+
   let evt;
   try {
     evt = stripe.webhooks.constructEvent(
-      event.body,
+      raw,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
@@ -42,8 +43,8 @@ exports.handler = async (event) => {
     };
   }
 
+  // (D) Business logic
   try {
-    // Helper to persist status into Blobs
     async function activateByCustomer({ customer, email, subscriptionId }) {
       let currentPeriodEnd = null;
       if (subscriptionId) {
@@ -74,7 +75,6 @@ exports.handler = async (event) => {
         });
         break;
       }
-
       case "invoice.paid": {
         const inv = evt.data.object;
         if (inv.subscription) {
@@ -90,21 +90,18 @@ exports.handler = async (event) => {
         }
         break;
       }
-
       case "customer.subscription.deleted": {
         const sub = evt.data.object;
         await setStatus(sub.customer, "canceled");
         break;
       }
-
       case "charge.refunded": {
         const ch = evt.data.object;
         await setStatus(ch.customer || ch.billing_details?.email, "refunded");
         break;
       }
-
       default:
-        // Ignore other event types
+        // ignore others
         break;
     }
 
