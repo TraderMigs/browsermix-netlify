@@ -1,12 +1,17 @@
+// netlify/functions/stripe-webhook.js
 // ===== Stripe Webhook (Netlify Functions) =====
-// IMPORTANT: Do NOT parse event.body before verifying signature.
-// Env needed: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
+// IMPORTANT: Do NOT parse event.body before verifying the signature.
+// Env needed: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, NETLIFY_SITE_ID, NETLIFY_BLOBS_TOKEN
+
 const Stripe = require("stripe");
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: "2024-06-20",
+});
+
 const { upsertLicense, preflight, corsHeaders } = require("./util.js");
 
 exports.handler = async (event) => {
-  // Preflight for CORS (Stripe won’t use it, but keeps consistency)
+  // Basic CORS preflight (Stripe won't use it, but keeps consistency)
   const pf = preflight(event);
   if (pf) return pf;
 
@@ -14,6 +19,9 @@ exports.handler = async (event) => {
     return { statusCode: 405, headers: corsHeaders, body: "Method Not Allowed" };
   }
 
+  // Stripe requires the raw request body for signature verification.
+  // Do NOT JSON.parse(event.body) before constructEvent.
+  // See: https://docs.stripe.com/webhooks#signatures
   const sig = event.headers["stripe-signature"];
   if (!sig) {
     return { statusCode: 400, headers: corsHeaders, body: "Missing signature" };
@@ -21,7 +29,6 @@ exports.handler = async (event) => {
 
   let evt;
   try {
-    // DO NOT JSON.parse(event.body). Stripe expects the raw string.
     evt = stripe.webhooks.constructEvent(
       event.body,
       sig,
@@ -70,7 +77,6 @@ exports.handler = async (event) => {
 
       case "invoice.paid": {
         const inv = evt.data.object;
-        // Refresh period end from the subscription
         if (inv.subscription) {
           const sub = await stripe.subscriptions.retrieve(inv.subscription);
           await upsertLicense(inv.customer, {
@@ -98,7 +104,7 @@ exports.handler = async (event) => {
       }
 
       default:
-        // Ignore other events
+        // Ignore other event types
         break;
     }
 
