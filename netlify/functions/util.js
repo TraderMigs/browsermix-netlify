@@ -1,40 +1,55 @@
 // netlify/functions/util.js
-const { getStore } = require('@netlify/blobs');
+// Utility helpers: CORS + Blobs-backed license upsert.
+//
+// IMPORTANT for Netlify Blobs:
+// - Call getStore() *inside* a function that's invoked per request.
+// - Provide siteID + token when running in environments where they're not injected automatically.
+//
+// Docs: https://docs.netlify.com/storage/overview/#blob-store
+// JavaScript API (getStore options): https://docs.netlify.com/storage/overview/#blob-store
+// (siteID/token are set automatically in Functions, but can be supplied manually)
 
-// CORS helpers (unchanged)
-const cors = {
-  headers: {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-    "Access-Control-Allow-Methods": "POST, OPTIONS"
-  }
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST,OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type,Stripe-Signature",
 };
-exports.preflight = (event) => {
+
+function preflight(event) {
   if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 200, headers: cors.headers, body: "" };
+    return { statusCode: 204, headers: corsHeaders };
   }
   return null;
-};
-exports.corsHeaders = cors.headers;
-
-// --- Blobs helpers (lazy store creation) ---
-async function getLicensesStore() {
-  // Pass siteId/token so it works in all environments
-  return getStore('licenses', {
-    siteId: process.env.NETLIFY_SITE_ID,
-    token: process.env.NETLIFY_BLOBS_TOKEN
-  });
 }
 
-exports.upsertLicense = async (key, value) => {
-  const store = await getLicensesStore();
-  await store.set(key, JSON.stringify(value), {
-    metadata: { contentType: 'application/json' }
-  });
-};
+/**
+ * Upsert a license record in Netlify Blobs.
+ * @param {string} idOrEmail - Stripe customer ID or e-mail
+ * @param {object} patch - fields to upsert
+ */
+async function upsertLicense(idOrEmail, patch) {
+  // Import at call-time so we’re not initializing at module scope.
+  const { getStore } = await import("@netlify/blobs");
 
-exports.getLicense = async (key) => {
-  const store = await getLicensesStore();
-  const val = await store.get(key, { type: 'json' });
-  return val || null;
-};
+  const store = getStore({
+    name: "licenses",
+    // Supply these explicitly to avoid "environment not configured" errors.
+    siteID: process.env.NETLIFY_SITE_ID,
+    token: process.env.NETLIFY_BLOBS_TOKEN,
+  });
+
+  const key = `license:${String(idOrEmail || "").toLowerCase()}`;
+
+  // Merge with any existing record
+  const existing = (await store.getJSON(key)) || {};
+  const merged = {
+    ...existing,
+    ...patch,
+    updated_at: new Date().toISOString(),
+  };
+
+  await store.setJSON(key, merged);
+  return merged;
+}
+
+module.exports = { corsHeaders, preflight, upsertLicense };
